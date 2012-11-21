@@ -25,7 +25,6 @@ static void tmu_work_out(struct work_struct *work) {
 
 	struct s_hkdk_tmu *hkdk_tmu = container_of(dw, struct s_hkdk_tmu, tmu_work);
 
-	enable_irq(hkdk_tmu->irq);
 	get_cur_temp(hkdk_tmu);
 	if (hkdk_tmu->TMU_TEMP1 == false && hkdk_tmu->curr_temp >= TMU_TEMP1_START) {
 		pr_info("HKDK Stage 1 Kick In\n");
