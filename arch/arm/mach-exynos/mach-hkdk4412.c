@@ -36,7 +36,6 @@
 #include <plat/devs.h>
 #include <plat/gpio-cfg.h>
 #include <plat/iic.h>
-#include <plat/keypad.h>
 #include <plat/mfc.h>
 #include <plat/regs-serial.h>
 #include <plat/sdhci.h>
@@ -1203,17 +1202,21 @@ static void __init hkdk4412_gpio_init(void)
 	gpio_request_one(EXYNOS4_GPA1(1), GPIOF_OUT_INIT_HIGH, "p3v3_en");
 
 #if defined(CONFIG_USB_HSIC_USB3503)
-	/* INT_N must be asserted if interrupt is not used */
-	gpio_request_one(EXYNOS4_GPX3(0), GPIOF_OUT_INIT_HIGH,
-				"usb3503_intn");
-
-	/* Hub will automatically transition to the Hub Communication Stage */
-	gpio_request_one(EXYNOS4_GPX3(4), GPIOF_OUT_INIT_HIGH,
-				"usb3503_connect");
-
 	/* USB3503 - Standby Mode */
 	gpio_request_one(EXYNOS4_GPX3(5), GPIOF_OUT_INIT_LOW,
 				"usb3503_reset_n");
+	/* INT_N must be asserted if interrupt is not used */
+#if defined(CONFIG_ODROIDU_COMMON)
+	/* Selecting the secondary REFCLK frequencies requires that the INT_N pin is be driven low */
+	gpio_request_one(EXYNOS4_GPX3(0), GPIOF_OUT_INIT_LOW,
+				"usb3503_intn");
+#else 
+	gpio_request_one(EXYNOS4_GPX3(0), GPIOF_OUT_INIT_HIGH,
+				"usb3503_intn");
+#endif 
+	/* Hub will automatically transition to the Hub Communication Stage */
+	gpio_request_one(EXYNOS4_GPX3(4), GPIOF_OUT_INIT_HIGH,
+				"usb3503_connect");
 #endif
 
 	/* Power on/off button */

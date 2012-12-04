@@ -385,7 +385,6 @@ config MACH_SMDK4212
 	select S5P_DEV_FIMD0
 	select S5P_DEV_MFC
 	select SAMSUNG_DEV_BACKLIGHT
-	select SAMSUNG_DEV_KEYPAD
 	select SAMSUNG_DEV_PWM
 	select EXYNOS_DEV_SYSMMU
 	select EXYNOS_DEV_DMA
@@ -428,7 +427,33 @@ config MACH_HKDK4412
 	select EXYNOS4_SETUP_DWMCI
 	select SAMSUNG_DEV_ADC
 	help
-	  Machine support for Odroid-X based on Samsung EXYNOS4412
+	  Machine support for Odroid-X,Q,U series based on Samsung EXYNOS4412
+
+config ODROIDU_COMMON
+	bool
+	help
+		Support common devices of ODROID-U series boards
+
+choice 
+	prompt "Odroid-X/Q/U series board"
+	depends on MACH_HKDK4412
+	default MACH_X2_BD
+
+config MACH_X_BD
+	bool "X Board"
+
+config MACH_X2_BD
+	bool "X2 Board"
+
+config MACH_U_BD
+	select ODROIDU_COMMON
+	bool "U Board"
+
+config MACH_U2_BD
+	select ODROIDU_COMMON
+	bool "U2 Board"
+
+endchoice 
 
 endif
 

@@ -315,7 +315,7 @@ static struct platform_device *smdk4x12_devices[] __initdata = {
 #ifdef CONFIG_DRM_EXYNOS
 	&exynos_device_drm,
 #endif
-	&samsung_device_keypad,
+//	&samsung_device_keypad,
 };
 
 static void __init smdk4x12_map_io(void)
@@ -350,7 +350,7 @@ static void __init smdk4x12_machine_init(void)
 
 	samsung_bl_set(&smdk4x12_bl_gpio_info, &smdk4x12_bl_data);
 
-	samsung_keypad_set_platdata(&smdk4x12_keypad_data);
+	//samsung_keypad_set_platdata(&smdk4x12_keypad_data);
 
 	s3c_sdhci2_set_platdata(&smdk4x12_hsmmc2_pdata);
 	s3c_sdhci3_set_platdata(&smdk4x12_hsmmc3_pdata);
