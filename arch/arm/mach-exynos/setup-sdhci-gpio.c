@@ -123,6 +123,10 @@ void exynos4_setup_sdhci2_cfg_gpio(struct platform_device *dev, int width)
 		s3c_gpio_setpull(EXYNOS4_GPK2(2), S3C_GPIO_PULL_UP);
 		s5p_gpio_set_drvstr(gpio, S5P_GPIO_DRVSTR_LV4);
 	}
+	if (pdata->cd_type == S3C_SDHCI_CD_GPIO){
+		s3c_gpio_cfgpin(EXYNOS4_GPK2(2), S3C_GPIO_SFN(0xf));
+		s5p_register_gpio_interrupt(pdata->ext_cd_gpio);
+	}
 }
 
 void exynos4_setup_sdhci3_cfg_gpio(struct platform_device *dev, int width)

@@ -35,6 +35,10 @@
 #define S5P_MFC_DEC_NAME	"s5p-mfc-dec"
 #define S5P_MFC_ENC_NAME	"s5p-mfc-enc"
 
+#include <mach/cpufreq.h>
+extern int exynos4_busfreq_lock(bool);
+#define MAX_CPU_FREQ 1400000
+
 int debug;
 module_param(debug, int, S_IRUGO | S_IWUSR);
 MODULE_PARM_DESC(debug, "Debug level - higher value produces more verbose messages");
@@ -643,6 +647,10 @@ static int s5p_mfc_open(struct file *file)
 	struct vb2_queue *q;
 	unsigned long flags;
 	int ret = 0;
+	exynos_cpufreq_lock_freq(1, MAX_CPU_FREQ);
+#ifdef CONFIG_BUSFREQ_OPP
+	dev_lock(dev->bus_dev, dev->device, BUSFREQ_400MHZ);
+#endif
 
 	mfc_debug_enter();
 	dev->num_inst++;	/* It is guarded by mfc_mutex in vfd */
@@ -728,10 +736,10 @@ static int s5p_mfc_open(struct file *file)
 	q->type = V4L2_BUF_TYPE_VIDEO_CAPTURE_MPLANE;
 	q->drv_priv = &ctx->fh;
 	if (s5p_mfc_get_node_type(file) == MFCNODE_DECODER) {
-		q->io_modes = VB2_MMAP;
+		q->io_modes = VB2_MMAP | VB2_DMABUF;
 		q->ops = get_dec_queue_ops();
 	} else if (s5p_mfc_get_node_type(file) == MFCNODE_ENCODER) {
-		q->io_modes = VB2_MMAP | VB2_USERPTR;
+		q->io_modes = VB2_MMAP | VB2_USERPTR | VB2_DMABUF;
 		q->ops = get_enc_queue_ops();
 	} else {
 		ret = -ENOENT;
@@ -749,10 +757,10 @@ static int s5p_mfc_open(struct file *file)
 	q->io_modes = VB2_MMAP;
 	q->drv_priv = &ctx->fh;
 	if (s5p_mfc_get_node_type(file) == MFCNODE_DECODER) {
-		q->io_modes = VB2_MMAP;
+		q->io_modes = VB2_MMAP | VB2_DMABUF;
 		q->ops = get_dec_queue_ops();
 	} else if (s5p_mfc_get_node_type(file) == MFCNODE_ENCODER) {
-		q->io_modes = VB2_MMAP | VB2_USERPTR;
+		q->io_modes = VB2_MMAP | VB2_USERPTR | VB2_DMABUF;
 		q->ops = get_enc_queue_ops();
 	} else {
 		ret = -ENOENT;
@@ -800,6 +808,10 @@ static int s5p_mfc_release(struct file *file)
 	struct s5p_mfc_ctx *ctx = fh_to_ctx(file->private_data);
 	struct s5p_mfc_dev *dev = ctx->dev;
 	unsigned long flags;
+	exynos_cpufreq_lock_freq(0, MAX_CPU_FREQ);
+#ifdef CONFIG_BUSFREQ_OPP
+	dev_unlock(dev->bus_dev, dev->device);
+#endif
 
 	mfc_debug_enter();
 	s5p_mfc_clock_on();
@@ -945,6 +957,7 @@ static int s5p_mfc_probe(struct platform_device *pdev)
 	struct s5p_mfc_dev *dev;
 	struct video_device *vfd;
 	struct resource *res;
+	struct device *device = &pdev->dev;
 	int ret;
 
 	pr_debug("%s++\n", __func__);
@@ -954,6 +967,7 @@ static int s5p_mfc_probe(struct platform_device *pdev)
 		return -ENOMEM;
 	}
 
+	dev->device = device;
 	spin_lock_init(&dev->irqlock);
 	spin_lock_init(&dev->condlock);
 	dev->plat_dev = pdev;
@@ -1044,7 +1058,6 @@ static int s5p_mfc_probe(struct platform_device *pdev)
 	ret = video_register_device(vfd, VFL_TYPE_GRABBER, 0);
 	if (ret) {
 		v4l2_err(&dev->v4l2_dev, "Failed to register video device\n");
-		video_device_release(vfd);
 		goto err_dec_reg;
 	}
 	v4l2_info(&dev->v4l2_dev,
@@ -1070,7 +1083,6 @@ static int s5p_mfc_probe(struct platform_device *pdev)
 	ret = video_register_device(vfd, VFL_TYPE_GRABBER, 0);
 	if (ret) {
 		v4l2_err(&dev->v4l2_dev, "Failed to register video device\n");
-		video_device_release(vfd);
 		goto err_enc_reg;
 	}
 	v4l2_info(&dev->v4l2_dev,
@@ -1085,6 +1097,11 @@ static int s5p_mfc_probe(struct platform_device *pdev)
 	init_timer(&dev->watchdog_timer);
 	dev->watchdog_timer.data = (unsigned long)dev;
 	dev->watchdog_timer.function = s5p_mfc_watchdog;
+
+#ifdef CONFIG_BUSFREQ_OPP
+	/* To lock bus frequency in OPP mode */
+	dev->bus_dev = dev_get("exynos-busfreq");
+#endif
 
 	pr_debug("%s--\n", __func__);
 	return 0;

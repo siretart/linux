@@ -21,12 +21,19 @@
 
 unsigned long samsung_cpu_id;
 static unsigned int samsung_cpu_rev;
+static unsigned int samsung_cpu_pack;
 
 unsigned int samsung_rev(void)
 {
 	return samsung_cpu_rev;
 }
 EXPORT_SYMBOL(samsung_rev);
+
+unsigned int samsung_pack(void)
+{
+	return samsung_cpu_pack;
+}
+EXPORT_SYMBOL(samsung_pack);
 
 void __init s3c24xx_init_cpu(void)
 {
@@ -54,4 +61,5 @@ void __init s5p_init_cpu(void __iomem *cpuid_addr)
 {
 	samsung_cpu_id = __raw_readl(cpuid_addr);
 	samsung_cpu_rev = samsung_cpu_id & 0xFF;
+	samsung_cpu_pack = (samsung_cpu_id >> 8) & 0x3;
 }

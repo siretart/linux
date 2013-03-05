@@ -49,6 +49,9 @@
 #define QUIRK_HDMIPHY		(1 << 1)
 #define QUIRK_NO_GPIO		(1 << 2)
 
+/* Max time to wait for bus to become idle after a xfer (in us) */
+#define S3C2410_IDLE_TIMEOUT	5000
+
 /* i2c controller state */
 enum s3c24xx_i2c_state {
 	STATE_IDLE,
@@ -59,7 +62,6 @@ enum s3c24xx_i2c_state {
 };
 
 struct s3c24xx_i2c {
-	spinlock_t		lock;
 	wait_queue_head_t	wait;
 	unsigned int            quirks;
 	unsigned int		suspended:1;
@@ -235,8 +237,47 @@ static inline void s3c24xx_i2c_stop(struct s3c24xx_i2c *i2c, int ret)
 
 	dev_dbg(i2c->dev, "STOP\n");
 
-	/* stop the transfer */
-	iicstat &= ~S3C2410_IICSTAT_START;
+	/*
+	 * The datasheet says that the STOP sequence should be:
+	 *  1) I2CSTAT.5 = 0	- Clear BUSY (or 'generate STOP')
+	 *  2) I2CCON.4 = 0	- Clear IRQPEND
+	 *  3) Wait until the stop condition takes effect.
+	 *  4*) I2CSTAT.4 = 0	- Clear TXRXEN
+	 *
+	 * Where, step "4*" is only for buses with the "HDMIPHY" quirk.
+	 *
+	 * However, after much experimentation, it appears that:
+	 * a) normal buses automatically clear BUSY and transition from
+	 *    Master->Slave when they complete generating a STOP condition.
+	 *    Therefore, step (3) can be done in doxfer() by polling I2CCON.4
+	 *    after starting the STOP generation here.
+	 * b) HDMIPHY bus does neither, so there is no way to do step 3.
+	 *    There is no indication when this bus has finished generating
+	 *    STOP.
+	 *
+	 * In fact, we have found that as soon as the IRQPEND bit is cleared in
+	 * step 2, the HDMIPHY bus generates the STOP condition, and then
+	 * immediately starts transferring another data byte, even though the
+	 * bus is supposedly stopped.  This is presumably because the bus is
+	 * still in "Master" mode, and its BUSY bit is still set.
+	 *
+	 * To avoid these extra post-STOP transactions on HDMI phy devices, we
+	 * just disable Serial Output on the bus (I2CSTAT.4 = 0) directly,
+	 * instead of first generating a proper STOP condition.  This should
+	 * float SDA & SCK terminating the transfer.  Subsequent transfers
+	 *  start with a proper START condition, and proceed normally.
+	 *
+	 * The HDMIPHY bus is an internal bus that always has exactly two
+	 * devices, the host as Master and the HDMIPHY device as the slave.
+	 * Skipping the STOP condition has been tested on this bus and works.
+	 */
+	if (i2c->quirks & QUIRK_HDMIPHY) {
+		/* Stop driving the I2C pins */
+		iicstat &= ~S3C2410_IICSTAT_TXRXEN;
+	} else {
+		/* stop the transfer */
+		iicstat &= ~S3C2410_IICSTAT_START;
+	}
 	writel(iicstat, i2c->regs + S3C2410_IICSTAT);
 
 	i2c->state = STATE_STOP;
@@ -490,13 +531,6 @@ static int s3c24xx_i2c_set_master(struct s3c24xx_i2c *i2c)
 	unsigned long iicstat;
 	int timeout = 400;
 
-	/* the timeout for HDMIPHY is reduced to 10 ms because
-	 * the hangup is expected to happen, so waiting 400 ms
-	 * causes only unnecessary system hangup
-	 */
-	if (i2c->quirks & QUIRK_HDMIPHY)
-		timeout = 10;
-
 	while (timeout-- > 0) {
 		iicstat = readl(i2c->regs + S3C2410_IICSTAT);
 
@@ -506,16 +540,49 @@ static int s3c24xx_i2c_set_master(struct s3c24xx_i2c *i2c)
 		msleep(1);
 	}
 
-	/* hang-up of bus dedicated for HDMIPHY occurred, resetting */
-	if (i2c->quirks & QUIRK_HDMIPHY) {
-		writel(0, i2c->regs + S3C2410_IICCON);
-		writel(0, i2c->regs + S3C2410_IICSTAT);
-		writel(0, i2c->regs + S3C2410_IICDS);
+	return -ETIMEDOUT;
+}
 
-		return 0;
+/* s3c24xx_i2c_wait_idle
+ *
+ * wait for the i2c bus to become idle.
+*/
+
+static void s3c24xx_i2c_wait_idle(struct s3c24xx_i2c *i2c)
+{
+	unsigned long iicstat;
+	ktime_t start, now;
+	unsigned long delay;
+
+	/* ensure the stop has been through the bus */
+
+	dev_dbg(i2c->dev, "waiting for bus idle\n");
+
+	start = now = ktime_get();
+
+	/*
+	 * Most of the time, the bus is already idle within a few usec of the
+	 * end of a transaction.  However, really slow i2c devices can stretch
+	 * the clock, delaying STOP generation.
+	 *
+	 * As a compromise between idle detection latency for the normal, fast
+	 * case, and system load in the slow device case, use an exponential
+	 * back off in the polling loop, up to 1/10th of the total timeout,
+	 * then continue to poll at a constant rate up to the timeout.
+	 */
+	iicstat = readl(i2c->regs + S3C2410_IICSTAT);
+	delay = 1;
+	while ((iicstat & S3C2410_IICSTAT_START) &&
+	       ktime_us_delta(now, start) < S3C2410_IDLE_TIMEOUT) {
+		usleep_range(delay, 2 * delay);
+		if (delay < S3C2410_IDLE_TIMEOUT / 10)
+			delay <<= 1;
+		now = ktime_get();
+		iicstat = readl(i2c->regs + S3C2410_IICSTAT);
 	}
 
-	return -ETIMEDOUT;
+	if (iicstat & S3C2410_IICSTAT_START)
+		dev_warn(i2c->dev, "timeout waiting for bus idle\n");
 }
 
 /* s3c24xx_i2c_doxfer
@@ -526,8 +593,7 @@ static int s3c24xx_i2c_set_master(struct s3c24xx_i2c *i2c)
 static int s3c24xx_i2c_doxfer(struct s3c24xx_i2c *i2c,
 			      struct i2c_msg *msgs, int num)
 {
-	unsigned long iicstat, timeout;
-	int spins = 20;
+	unsigned long timeout;
 	int ret;
 
 	if (i2c->suspended)
@@ -540,8 +606,6 @@ static int s3c24xx_i2c_doxfer(struct s3c24xx_i2c *i2c,
 		goto out;
 	}
 
-	spin_lock_irq(&i2c->lock);
-
 	i2c->msg     = msgs;
 	i2c->msg_num = num;
 	i2c->msg_ptr = 0;
@@ -550,7 +614,6 @@ static int s3c24xx_i2c_doxfer(struct s3c24xx_i2c *i2c,
 
 	s3c24xx_i2c_enable_irq(i2c);
 	s3c24xx_i2c_message_start(i2c, msgs);
-	spin_unlock_irq(&i2c->lock);
 
 	timeout = wait_event_timeout(i2c->wait, i2c->msg_num == 0, HZ * 5);
 
@@ -564,24 +627,11 @@ static int s3c24xx_i2c_doxfer(struct s3c24xx_i2c *i2c,
 	else if (ret != num)
 		dev_dbg(i2c->dev, "incomplete xfer (%d)\n", ret);
 
-	/* ensure the stop has been through the bus */
+	/* For QUIRK_HDMIPHY, bus is already disabled */
+	if (i2c->quirks & QUIRK_HDMIPHY)
+		goto out;
 
-	dev_dbg(i2c->dev, "waiting for bus idle\n");
-
-	/* first, try busy waiting briefly */
-	do {
-		cpu_relax();
-		iicstat = readl(i2c->regs + S3C2410_IICSTAT);
-	} while ((iicstat & S3C2410_IICSTAT_START) && --spins);
-
-	/* if that timed out sleep */
-	if (!spins) {
-		msleep(1);
-		iicstat = readl(i2c->regs + S3C2410_IICSTAT);
-	}
-
-	if (iicstat & S3C2410_IICSTAT_START)
-		dev_warn(i2c->dev, "timeout waiting for bus idle\n");
+	s3c24xx_i2c_wait_idle(i2c);
 
  out:
 	return ret;
@@ -740,7 +790,6 @@ static int s3c24xx_i2c_cpufreq_transition(struct notifier_block *nb,
 					  unsigned long val, void *data)
 {
 	struct s3c24xx_i2c *i2c = freq_to_i2c(nb);
-	unsigned long flags;
 	unsigned int got;
 	int delta_f;
 	int ret;
@@ -754,9 +803,9 @@ static int s3c24xx_i2c_cpufreq_transition(struct notifier_block *nb,
 
 	if ((val == CPUFREQ_POSTCHANGE && delta_f < 0) ||
 	    (val == CPUFREQ_PRECHANGE && delta_f > 0)) {
-		spin_lock_irqsave(&i2c->lock, flags);
+		i2c_lock_adapter(&i2c->adap);
 		ret = s3c24xx_i2c_clockrate(i2c, &got);
-		spin_unlock_irqrestore(&i2c->lock, flags);
+		i2c_unlock_adapter(&i2c->adap);
 
 		if (ret < 0)
 			dev_err(i2c->dev, "cannot find frequency\n");
@@ -962,7 +1011,6 @@ static int s3c24xx_i2c_probe(struct platform_device *pdev)
 	i2c->adap.class   = I2C_CLASS_HWMON | I2C_CLASS_SPD;
 	i2c->tx_setup     = 50;
 
-	spin_lock_init(&i2c->lock);
 	init_waitqueue_head(&i2c->wait);
 
 	/* find the clock and enable it */

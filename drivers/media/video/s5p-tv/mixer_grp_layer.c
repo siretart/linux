@@ -14,6 +14,9 @@
 #include "mixer.h"
 
 #include <media/videobuf2-dma-contig.h>
+#include <mach/cpufreq.h>
+extern int exynos4_busfreq_lock(bool);
+#define MAX_CPU_FREQ 1400000
 
 /* FORMAT DEFINITIONS */
 
@@ -92,6 +95,20 @@ static void mxr_graph_buffer_set(struct mxr_layer *layer,
 
 static void mxr_graph_stream_set(struct mxr_layer *layer, int en)
 {
+	struct mxr_device *mdev = layer->mdev;
+
+	exynos_cpufreq_lock_freq(en, MAX_CPU_FREQ);
+
+#ifdef CONFIG_BUSFREQ_OPP
+	if (en)
+		dev_lock(mdev->bus_dev, mdev->dev, BUSFREQ_400MHZ);
+	else
+		dev_unlock(mdev->bus_dev, mdev->dev);
+#endif
+
+#ifdef CONFIG_ARM_EXYNOS4_BUS_DEVFREQ
+	exynos4_busfreq_lock(!en);
+#endif
 	mxr_reg_graph_layer_stream(layer->mdev, layer->idx, en);
 }
 
@@ -229,6 +246,34 @@ static void mxr_graph_fix_geometry(struct mxr_layer *layer,
 	};
 }
 
+static void mixer_graph_chromakey_enable(struct mxr_layer *layer,u32 en)
+{
+        mxr_reg_graph_chromakey_enable(layer->mdev, layer->idx,en);
+}
+static void mixer_graph_chromakey_value(struct mxr_layer *layer,u32 en)
+{
+  	mxr_reg_graph_chromakey_value(layer->mdev, layer->idx,en);
+}
+static void mixer_graph_change_priority(struct mxr_layer *layer,u32 en)
+{
+  	mxr_reg_graph_priority(layer->mdev, layer->idx,en);
+}
+
+static void mixer_graph_layer_blend_enable(struct mxr_layer *layer,u32 en)
+{
+        mxr_reg_graph_layer_blend_enable(layer->mdev, layer->idx,en);
+}
+
+static void mixer_graph_layer_blend_alpha(struct mxr_layer *layer,u32 en)
+{
+   	mxr_reg_graph_layer_blend_alpha(layer->mdev, layer->idx,en);
+}
+
+static void mixer_graph_pixel_blend_enable(struct mxr_layer *layer,u32 en)
+{
+	mxr_reg_graph_pixel_blend_enable(layer->mdev, layer->idx,en);
+}
+
 /* PUBLIC API */
 
 struct mxr_layer *mxr_graph_layer_create(struct mxr_device *mdev, int idx)
@@ -241,6 +286,12 @@ struct mxr_layer *mxr_graph_layer_create(struct mxr_device *mdev, int idx)
 		.stream_set = mxr_graph_stream_set,
 		.format_set = mxr_graph_format_set,
 		.fix_geometry = mxr_graph_fix_geometry,
+		.chromakey_enable = mixer_graph_chromakey_enable,
+		.chromakey_value = mixer_graph_chromakey_value,
+                .change_priority = mixer_graph_change_priority, 
+		.layer_blend_enable = mixer_graph_layer_blend_enable,
+		.layer_blend_alpha =  mixer_graph_layer_blend_alpha,
+		.pixel_blend_enable=  mixer_graph_pixel_blend_enable,
 	};
 	char name[32];
 

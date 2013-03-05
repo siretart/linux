@@ -680,11 +680,8 @@ static u8 sdhci_calc_timeout(struct sdhci_host *host, struct mmc_command *cmd)
 			break;
 	}
 
-	if (count >= 0xF) {
-		DBG("%s: Too large timeout 0x%x requested for CMD%d!\n",
-		    mmc_hostname(host->mmc), count, cmd->opcode);
+	if (count >= 0xF)
 		count = 0xE;
-	}
 
 	return count;
 }
@@ -1083,7 +1080,7 @@ static void sdhci_set_clock(struct sdhci_host *host, unsigned int clock)
 	if (host->ops->set_clock) {
 		host->ops->set_clock(host, clock);
 		if (host->quirks & SDHCI_QUIRK_NONSTANDARD_CLOCK)
-			return;
+			goto out;
 	}
 
 	sdhci_writew(host, 0, SDHCI_CLOCK_CONTROL);

@@ -286,6 +286,11 @@ config TOUCHSCREEN_S3C2410
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called s3c2410_ts.
+config TOUCHSCREEN_EXYNOS4
+	tristate "Samsung EXYNOS4 10.1\" touchscreen input driver"
+	depends on ARCH_EXYNOS4
+	help
+	  Say Y here if you have the EXYNOS4 touchscreen.
 
 config TOUCHSCREEN_GUNZE
 	tristate "Gunze AHL-51S touchscreen"
@@ -479,6 +484,12 @@ config TOUCHSCREEN_TNETV107X
 
 	  To compile this driver as a module, choose M here: the
 	  module will be called tnetv107x-ts.
+
+config TOUCHSCREEN_SYNAPTICS_I2C_RMI
+	tristate "Synaptics i2c touchscreen"
+	depends on I2C
+	help
+	  This enables support for Synaptics RMI over I2C based touchscreens.
 
 config TOUCHSCREEN_TOUCHRIGHT
 	tristate "Touchright serial touchscreen"

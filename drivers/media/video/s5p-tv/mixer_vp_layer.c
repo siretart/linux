@@ -16,6 +16,9 @@
 #include "regs-vp.h"
 
 #include <media/videobuf2-dma-contig.h>
+#include <mach/cpufreq.h>
+extern int exynos4_busfreq_lock(bool);
+#define MAX_CPU_FREQ 1400000
 
 /* FORMAT DEFINITIONS */
 static const struct mxr_format mxr_fmt_nv12 = {
@@ -119,6 +122,10 @@ static void mxr_vp_buffer_set(struct mxr_layer *layer,
 
 static void mxr_vp_stream_set(struct mxr_layer *layer, int en)
 {
+	exynos_cpufreq_lock_freq(en, MAX_CPU_FREQ);
+#ifdef CONFIG_ARM_EXYNOS4_BUS_DEVFREQ
+   	exynos4_busfreq_lock(!en);	
+#endif
 	mxr_reg_vp_layer_stream(layer->mdev, en);
 }
 
@@ -200,6 +207,23 @@ static void mxr_vp_fix_geometry(struct mxr_layer *layer,
 	};
 }
 
+static void mixer_vp_change_priority(struct mxr_layer *layer,
+                                unsigned int en)
+{
+  	mxr_reg_vp_priority(layer->mdev,layer->idx,en);
+}
+
+static void mixer_vp_layer_blend_enable(struct mxr_layer *layer,
+                                unsigned int en)
+{
+  	mxr_reg_vp_layer_blend_enable(layer->mdev,layer->idx,en);
+}
+static void mixer_vp_layer_blend_alpha(struct mxr_layer *layer,
+                                unsigned int en)
+{
+	mxr_reg_vp_layer_blend_alpha(layer->mdev,layer->idx,en);
+}
+
 /* PUBLIC API */
 
 struct mxr_layer *mxr_vp_layer_create(struct mxr_device *mdev, int idx)
@@ -212,6 +236,9 @@ struct mxr_layer *mxr_vp_layer_create(struct mxr_device *mdev, int idx)
 		.stream_set = mxr_vp_stream_set,
 		.format_set = mxr_vp_format_set,
 		.fix_geometry = mxr_vp_fix_geometry,
+                .change_priority = mixer_vp_change_priority, 
+                .layer_blend_enable = mixer_vp_layer_blend_enable,
+                .layer_blend_alpha =  mixer_vp_layer_blend_alpha,
 	};
 	char name[32];
 
